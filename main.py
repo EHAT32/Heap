@@ -5,7 +5,7 @@ class DHeap:
     def __init__(self, alloc_size = 100):
         self.heap = np.zeros(alloc_size) #Первоначальный размер памяти, выделенной под кучу
         self.heap_size = 0
-        self.arity = 2
+        self.arity = 5
 
     def siftDown(self, i):
         while self.arity * i + 1 < self.heap_size:
@@ -52,41 +52,47 @@ class DHeap:
         self.siftUp(self.heap_size - 1)
 
     def Heapify(self, i):
-        left = 2 * i
-        right = 2 * i + 1
-        #heap_size - количество элементов в куче
-        largest = i
-        if left <= self.heap_size and self.heap[left] > self.heap[largest]:
-            largest = left
-        if right <= self.heap_size and self.heap[right] > self.heap[largest]:
-            largest = right
-        if largest != i:
-            self.heap[i], self.heap[largest] = self.heap[largest], self.heap[i]
-            self.Heapify(largest) #self removed
+        least = i
+        for j in range(self.arity):
+            child = self.arity * i + j + 1
+            #heap_size - количество элементов в куче
+            if child >= self.heap_size:
+                break
+            if self.heap[child] < self.heap[least]:
+                least = child
+        if least != i:
+            self.heap[i], self.heap[least] = self.heap[least], self.heap[i]
+            self.Heapify(least) #self removed
 
     def Build_Heap(self):
-        self.heap_size = np.size(self.heap)
-        for i in range(int(np.size(self.heap) / 2), 0, -1):
+        for i in range(int(self.heap_size / self.arity), -1, -1):
             self.Heapify(i)
 
     
     
     @staticmethod
     def merge(a, b):
-        for i in  range(b.heap_size - 1):  
+        for i in  range(b.heap_size):
+            a.__reallocate_heap(a.heap_size + 1)
             a.heap_size = a.heap_size + 1
             a.heap[a.heap_size - 1] = b.heap[i]
-        a.Heapify(i)
+        a.Build_Heap()
 
 def main():
     heap1 = DHeap()
     heap2 = DHeap()
     
     heap1.insert(3)
-    heap1.insert(4)
-    heap1.insert(2)
+    heap2.insert(-5)
+    heap2.insert(10)
     heap1.insert(1)
+    heap1.insert(9)
+    heap2.insert(0.5)
+    heap2.insert(8)
+    heap1.insert(-2)
 
+
+    DHeap.merge(heap1, heap2)
 
     return
 
