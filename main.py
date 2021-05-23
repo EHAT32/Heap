@@ -2,10 +2,18 @@ import numpy as np
 from numpy import random
 
 class DHeap:
-    def __init__(self, arity = 9, alloc_size = 100):
-        self.__heap = np.zeros(alloc_size) #Первоначальный размер памяти, выделенной под кучу
-        self.__heap_size = 0
+    def __init__(self, arity = 9, alloc_size = 100, data =  None):
         self.__arity = arity
+        if data != None:
+            self.__heap = data
+            self.__heap_size = np.size(data)
+            self.Build_Heap()
+        else:
+            self.__heap = np.zeros(alloc_size) #Первоначальный размер памяти, выделенной под кучу
+            self.__heap_size = 0
+
+    def __len__(self):
+        return self.__heap_size
 
     def siftDown(self, i):
         while self.__arity * i + 1 < self.__heap_size:
@@ -99,6 +107,25 @@ def Dijkstra(Graph, source):
 
     return dist, prev
 
+def Dijkstra_heap(Graph, source):
+    vertex_count = np.size(Graph, 0)
+    Q = DHeap(data = list(range(vertex_count)))
+    dist = [None] * vertex_count
+    prev = [None] * vertex_count                 
+    dist[source] = 0                       
+     
+    while Q:
+        u = Q.extractMin()   
+        for i in range(vertex_count):
+            if Graph[u, i] == None:
+                continue
+            alt = dist[u] + Graph[u, i]
+            if dist[i] == None or alt < dist[i]:              
+                dist[i] = alt
+                prev[i] = u
+
+    return dist, prev
+
 def main():
     Graph = np.array(
         [
@@ -111,7 +138,9 @@ def main():
         ]
     )
 
-    dist, prev = Dijkstra(Graph, 0)
+    #dist, prev = Dijkstra(Graph, 0)
+
+    dist, prev = Dijkstra_heap(Graph, 0)
 
     return
 
