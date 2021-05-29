@@ -1,8 +1,16 @@
 import numpy as np
 from numpy import random
 import time
-
-from numpy.lib.function_base import insert
+import matplotlib.pyplot as plt
+from numpy.core.fromnumeric import sort
+from numpy.testing._private.utils import measure
+from joblib import Parallel, delayed
+import multiprocessing
+from scipy.sparse.construct import rand
+from tqdm import tqdm
+import math
+import random
+import scipy.sparse as sp
 
 class DHeap:
     def __init__(self, arity = 9, alloc_size = 100, key_selector = None, unique_selector = None):
@@ -31,11 +39,11 @@ class DHeap:
                 if child >= self.__heap_size:
                     break
                 if min_child == -1 or self.__select_key(self.__heap[min_child]) >= self.__select_key(self.__heap[child]):
-                    min_child, child = child, min_child
+                    min_child = child
             
-            heap_i = self.__select_unique(self.__heap[i])
-            heap_min_child = self.__select_unique(self.__heap[min_child])
-            if heap_i > heap_min_child:
+            if self.__select_key(self.__heap[i]) > self.__select_key(self.__heap[min_child]):
+                heap_i = self.__select_unique(self.__heap[i])
+                heap_min_child = self.__select_unique(self.__heap[min_child])
                 self.__indices[heap_i], self.__indices[heap_min_child] = self.__indices[heap_min_child], self.__indices[heap_i]
                 self.__heap[i], self.__heap[min_child] = self.__heap[min_child], self.__heap[i]
                 i = min_child
@@ -48,11 +56,20 @@ class DHeap:
 
 
     def siftUp(self, i):
-        heap_i = self.__select_unique(self.__heap[i])
-        parent = self.__select_unique(self.__heap[int((i - 1) / self.__arity)])
-        while heap_i < parent:
-            self.__indices[heap_i], self.__indices[parent] = self.__indices[parent], self.__indices[heap_i]
-            self.__heap[i], self.__heap[int((i - 1) / self.__arity)] = self.__heap[int((i - 1) / self.__arity)], self.__heap[i]
+        while True:
+            parent_idx = int((i - 1) / self.__arity)
+            child = self.__select_key(self.__heap[i])
+            parent = self.__select_key(self.__heap[parent_idx])
+            if child >= parent:
+                break
+            child_u = self.__select_unique(self.__heap[i])
+            parent_u = self.__select_unique(self.__heap[parent_idx])
+            self.__indices[child_u], self.__indices[parent_u] = self.__indices[parent_u], self.__indices[child_u]
+
+            tmp = self.__heap[i]
+            self.__heap[i] = self.__heap[parent_idx]
+            self.__heap[int((i - 1) / self.__arity)] = tmp
+
             i = int((i - 1) / self.__arity)
     
     def extractMin(self):
@@ -77,13 +94,15 @@ class DHeap:
         self.__indices[self.__select_unique(value)] = self.__heap_size - 1
         self.siftUp(self.__heap_size - 1)
 
-    def __setitem__(self, value, priority):
-        if value in self.__indices:
-            idx = self.__indices[value]
-            self.__heap[idx] = priority
-            self.Heapify(idx)
+    def __setitem__(self, value, obj):
+        idx = self.__indices[value]
+        old_priority = self.__select_key(self.__heap[idx])
+        priority = self.__select_key(obj)
+        self.__heap[idx] = obj
+        if priority < old_priority:
+            self.siftUp(idx)
         else:
-            self.insert(priority)
+            self.siftDown(idx)
 
     def Heapify(self, i):
         least = i
@@ -126,94 +145,169 @@ class DHeap:
         dheap.Build_Heap()
         return dheap
 
-
-def Dijkstra(Graph, source):
-    vertex_count = np.size(Graph, 0)
+def dijkstra(graph : sp.csr_matrix, source):
+    graph_csc = graph.tocsc()
+    vertex_count = graph.get_shape()[0]
     Q = list(range(vertex_count))
     dist = [np.inf] * vertex_count
-    prev = [None] * vertex_count                 
+    #prev = [None] * vertex_count                 
     dist[source] = 0                       
     
-    start = time.perf_counter()
     while Q:
         min_idx = np.argmin(dist)
         u = Q[min_idx]   
-                                            
         Q.pop(min_idx)
         
-        for i in range(vertex_count):
-            if Graph[u, i] == None or u == i:
-                continue
-            alt = dist[u] + Graph[u, i]
-            if alt < dist[i]:              
-                dist[i] = alt
-                prev[i] = u
-    stop = time.perf_counter()
-    elapsed_time = (stop - start)
-    print('dijkstra elapsed_time: {} s'.format(elapsed_time))
+        def update(graph):
+            nnz = graph.indptr[u + 1] - graph.indptr[u]
+            for k in range(nnz):
+                i = graph.indptr[u] + k
+                weight = graph.data[i]
+                alt = dist[u] + weight
+                if alt < dist[graph.indices[i]]:
+                    dist[graph.indices[i]] = alt
 
-    return dist, prev
+        update(graph)
+        update(graph_csc)
 
-def Dijkstra_heap(Graph, source):
-    vertex_count = np.size(Graph, 0)
+    return dist#, prev
+
+def dijkstra_heap(graph : sp.csr_matrix, source):
+    graph_csc = graph.tocsc()
+    vertex_count = np.size(graph, 0)
     dist = [np.inf] * vertex_count
     dist[source] = 0                       
     Q = DHeap.make_dheap(list(zip(range(vertex_count), dist)), key_selector=lambda x: x[1], unique_selector=lambda x: x[0])
-    prev = [None] * vertex_count
+    #prev = [None] * vertex_count
      
-    start = time.perf_counter()
     while Q:
-        vertex_idx, min_dist = Q.extractMin()
-        for i in range(vertex_count):
-            if Graph[vertex_idx, i] == None:
-                continue
-            alt = min_dist + Graph[vertex_idx, i]
-            if alt < dist[i]:              
-                dist[i] = alt
-                prev[i] = vertex_idx
-                Q[i] = (i, alt)
+        u, _ = Q.extractMin()
+        def update(graph):
+            nnz = graph.indptr[u + 1] - graph.indptr[u]
+            for k in range(nnz):
+                i = graph.indptr[u] + k
+                weight = graph.data[i]
+                alt = dist[u] + weight
+                if alt < dist[graph.indices[i]]:
+                    dist[graph.indices[i]] = alt
+                    Q[graph.indices[i]] = (graph.indices[i], alt)
 
-    stop = time.perf_counter()
-    elapsed_time = (stop - start)
-    print('dijkstra on heap elapsed_time: {} s'.format(elapsed_time))
-    return dist, prev
+        update(graph)
+        update(graph_csc)
+
+    return dist#, prev
+
+def coor_to_idx(n, i, j):
+    return i * (2 * n - i + 1) // 2 + j - i
+
+def idx_to_coor(size, idx, offset = 0):
+    n, k = size - offset, idx
+    i = math.floor((-math.sqrt((2 * n + 1) * (2 * n + 1) - 8 * k) + 2 * n + 1) / 2)
+    j = k + i - i * (2 * n - i + 1) // 2
+    return i, j + offset
+
+def generate_sparse_data(n, m, q, r):
+    random_indices = [idx_to_coor(n, i, 1) for i in sorted(random.sample(range(n * (n - 1) // 2), m))]
+    data = (r - q) * np.random.random_sample(m) + q
+    indices = [coord[1] for coord in random_indices]
+    indptr = [-1] * (n + 1)
+    fst_nnz = -1
+    fst_nnz_idx = 0
+    for i, value in enumerate(random_indices):
+        r, c = value
+        indices[i] = c
+        for k in range(r - fst_nnz):
+            indptr[fst_nnz_idx] = i
+            fst_nnz = r
+            fst_nnz_idx += 1
+    for k in range(n - fst_nnz):
+        indptr[fst_nnz_idx] = m
+        fst_nnz_idx += 1
+
+    sgraph = sp.csr_matrix((data, indices, indptr), shape=(n, n), dtype=float)
+    return sgraph
 
 def generate_data(n, m, q, r):
-    upper_indices = np.triu_indices(n, 1)
-    upper_indices = np.array(list(zip(upper_indices[0], upper_indices[1])), dtype = 'i,i')
-    upper_indices = np.random.choice(upper_indices, m, replace = False)
+    random_indices = [idx_to_coor(n, i, 1) for i in sorted(random.sample(range(n * (n - 1) // 2), m))]
 
     graph = np.empty((n, n), dtype = object)
     
     for i in range(m):
-       x, y = upper_indices[i]
+       x, y = random_indices[i]
        graph[x, y] = random.randint(q, r + 1)
        graph[y, x] = graph[x, y]
     
     for i in range(n):
         graph[i, i] = 0
 
-    return graph 
+    return graph  
 
+def generate_debug_data():
+    return np.array(
+        [
+            [0 , 7 , 9 , 0 , 0 , 14], 
+            [7 , 0 , 10, 15, 0 , 0 ],
+            [9 , 10, 0 , 11, 0 , 2 ],
+            [0 , 15, 11, 0 , 6 , 0 ],
+            [0 , 0 , 0 , 6 , 0 , 9 ],
+            [14, 0 , 2 , 0 , 9 , 0 ]
+        ]
+    )
 
+def generate_debug_sdata():
+    return sp.csr_matrix(generate_debug_data())
+
+def time_counter(func, measurements_count):
+
+    start = time.perf_counter()
+    for i in range(measurements_count):
+        func()
+    stop = time.perf_counter()
+
+    return (stop - start) / measurements_count
+
+def plots(vertices, time_heap, time_mark):
+    
+    fig = plt.figure()
+
+    #plt.set_title('Time versus vertices number using heap')
+    plt.ylabel('Elapsed time, seconds')
+    plt.xlabel('Number of vertices')
+    plt.plot(vertices, time_heap)
+
+    #plt.set_title('Time versus vertices number using marks')
+    plt.plot(vertices, time_mark)
+    plt.legend(["d-heap", "marks"])
+
+    plt.show()
 
 def main():
-    graph = generate_data(10000, 5000, 1, 2000)
-    #graph = np.array(
-    #    [
-    #        [0   , 7   , 9   , None, None, 14  ], 
-    #        [7   , 0   , 10  , 15  , None, None],
-    #        [9   , 10  , 0   , 11  , None, 2   ],
-    #        [None, 15  , 11  , 0   , 6   , None],
-    #        [None, None, None, 6   , 0   , 9   ],
-    #        [14  , None, 2   , None, 9   , 0   ]
-    #    ]
-    #)
-    measurements_count = 1
-    
-    _, _ = Dijkstra(graph, 0)
-    _, _ = Dijkstra_heap(graph, 0)
-    
+    # vertices = [0] * 100
+    # time_mark = [0] * 100
+    # time_heap = [0] * 100
+
+    num_cores = multiprocessing.cpu_count()# // 2
+
+    def iter(i):
+        graph = generate_sparse_data(i, 100 * i, 1, 1e6)
+        elapsed_time_mark = time_counter(lambda : dijkstra(graph, 0), 1)
+        elapsed_time_heap = time_counter(lambda : dijkstra_heap(graph, 0), 1)
+        return i, elapsed_time_heap, elapsed_time_mark
+    processed_list = Parallel(n_jobs=num_cores)(delayed(iter)(i) for i in tqdm(range(1000, 100000 + 1, 1000)))
+    vertices, time_heap, time_mark = zip(*processed_list)
+
+    #for i in tqdm(range(1000, 100000 + 1, 1000)):
+    #    graph = generate_sparse_data(i, 100 * i, 1, 1e6)
+#
+    #    elapsed_time_mark = time_counter(lambda : dijkstra(graph, 0), 1)
+    #    elapsed_time_heap = time_counter(lambda : dijkstra_heap(graph, 0), 1)
+    #    idx = int((i - 1000) / 1000)
+    #    vertices[idx] = i
+    #    time_mark[idx] = elapsed_time_mark
+    #    time_heap[idx] = elapsed_time_heap
+
+    plots(vertices, time_heap, time_mark)
+        
     return
 
 if __name__ == '__main__':
